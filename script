@@ -1,0 +1,1195 @@
+"""
+Created on Mon Mar 18 21:07:39 2019
+
+Game of Thrones
+
+Purpose to analyze who lives and dies in Game of Thrones
+
+@author: Gsond001
+"""
+
+# Importing Libraries
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+import statsmodels.formula.api as smf # regression modeling
+from sklearn.model_selection import cross_val_score # k-folds cross validation
+from sklearn.tree import export_graphviz # Exports graphics
+from sklearn.externals.six import StringIO # Saves an object in memory
+from IPython.display import Image # Displays an image on the frontend
+import pydotplus # Interprets dot objects
+from sklearn.model_selection import train_test_split # train/test split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import roc_auc_score # ROC_AUC value
+from sklearn.metrics import confusion_matrix
+from sklearn.linear_model import LogisticRegression #Sklearn Regression
+from sklearn.preprocessing import StandardScaler # standard scaler
+from sklearn.tree import DecisionTreeClassifier #Decision ree 
+from sklearn.model_selection import GridSearchCV #GridSearch
+from sklearn.ensemble import RandomForestClassifier #Random Forrest
+from sklearn.ensemble import GradientBoostingClassifier #Gradient Boost
+
+
+#Importing the Dataset
+
+got_pre = pd.read_excel('GOT_character_predictions.xlsx')
+
+
+#Looking at the columns in the dataset
+
+got_pre.columns
+
+#Checking the descriptive statistics 
+
+got_pre.describe()
+
+
+#Information of each variables
+got_pre.info()
+
+###############################################################################
+# Imputing Missing Values
+###############################################################################
+
+
+#Checking for Missing Values
+print(
+      got_pre
+      .isnull()
+      .sum()
+      )
+
+"""
+There s alot of missing values and it will be impossible to drop the data
+Missing values include:
+
+title                         1008
+culture                       1269
+dateOfBirth                   1513
+mother                        1925
+father                        1920
+heir                          1923
+house                          427
+spouse                        1670
+IsAliveMother                 1925
+isAliveFather                 1920
+isAliveHeir                   1923
+isAliveSpouse                 1670
+age                           1513
+  
+"""
+
+
+#Creating a new dataframe to add the missing values
+
+got1 = pd.DataFrame.copy(got_pre)
+
+#Creating new columns for missing values and interporlating them for 0 if not
+#missing and 1 if missing
+
+for col in got1:
+    if got1[col].isnull().any():
+        got1['m_' + col] = got1[col].isnull().astype(int)
+        
+        
+#Looking at the values within the Dataframe
+
+
+got1.pivot_table(index=['title'], aggfunc='size').sort_values(
+        ascending= False)
+
+got1.pivot_table(index=['name'], aggfunc='size').sort_values(
+        ascending= False)
+
+got1.pivot_table(index=['house'], aggfunc='size').sort_values(
+        ascending= False)
+
+got1.pivot_table(index=['culture'], aggfunc='size').sort_values(
+        ascending= False)
+
+got1.pivot_table(index=['dateOfBirth'], aggfunc='size').sort_values(
+        ascending= False)
+
+got1.pivot_table(index=['age'], aggfunc='size').sort_values(
+        ascending= False)
+
+
+"""Source: https://gameofthrones.fandom.com/wiki/Rhaego"""
+#Replace age missing values with median
+got1['age']=got1['age'].fillna(got1['age'].median())
+got1['dateOfBirth'] = got1['dateOfBirth'].fillna(got1['dateOfBirth'].median())
+
+
+#Flagging outliers 
+#First let's create plots:
+
+plt.subplot(2, 2, 1)
+sns.distplot(got1['age'],
+             color = 'r')
+plt.xlabel("Character's Age")
+
+plt.subplot(2, 2, 2)
+sns.distplot(got1['popularity'],
+             color = 'orange')
+plt.xlabel('Popularity Based on Characters')
+
+plt.subplot(2, 2, 3)
+sns.distplot(got1['male'],
+             color = 'purple')
+plt.xlabel('How Many People are Male')
+
+
+plt.subplot(2, 2, 4)
+sns.distplot(got1['numDeadRelations'],
+             color = 'y')
+plt.xlabel('Number of Dead Relations')
+
+
+plt.tight_layout()
+plt.savefig('GOT Histograms .jpeg')
+plt.show()
+
+
+#Beginning by Flagging
+age_hi = 75
+
+pop_hi = .37
+
+dead_hi = 3
+
+
+got1['out_age'] = 0
+
+
+for val in enumerate(got1.loc[ : , 'age']):
+    
+    if val[1] >= age_hi:
+        got1.loc[val[0], 'out_age'] = 1
+
+
+got1['out_pop'] = 0
+
+for val in enumerate(got1.loc[ : , 'popularity']):
+    
+    if val[1] >= pop_hi:
+        got1.loc[val[0], 'out_pop'] = 1
+
+
+got1['out_dead'] = 0
+
+for val in enumerate(got1.loc[ : , 'numDeadRelations']):
+    
+    if val[1] >= dead_hi:
+        got1.loc[val[0], 'out_dead'] = 1
+
+
+#Replacing missing values in columns for unknown and -1 
+
+
+fill = 'Unknown' 
+
+for col in got1:
+    if got1[col].isnull().any():
+        got1['un_' + col] = got1[col].fillna(fill)
+        
+got1['un_isAliveMother'] = got1['un_isAliveMother'].replace('Unknown',-1)
+
+got1['un_isAliveFather'] = got1['un_isAliveFather'].replace('Unknown',-1)
+
+got1['un_isAliveHeir'] = got1['un_isAliveHeir'].replace('Unknown',-1)
+
+got1['un_isAliveSpouse'] = got1['un_isAliveSpouse'].replace('Unknown',-1)
+
+
+###############################################################################
+#Creating Dummy variables 
+###############################################################################
+
+
+#Grouping loose houses together
+
+got1['un_house'][got1['name'].str.contains
+     ('Lannister')] = 'House Lannister'
+got1['un_house'][got1['un_house'].str.contains
+     ('Lannister')] = 'House Lannister' 
+
+
+got1['un_house'][got1['name'].str.contains
+     ('Baratheon')] = 'House Baratheon'
+got1['un_house'][got1['un_house'].str.contains
+     ('Baratheon')] = 'House Baratheon' 
+
+got1['un_house'][got1['name'].str.contains
+     ('without banners')] = 'Brotherhood without banners'
+got1['un_house'][got1['un_house'].str.contains
+     ('without banners')] = 'Brotherhood without banners' 
+
+got1['un_house'][got1['name'].str.contains
+     ('Bolton')] = 'House Bolton'
+got1['un_house'][got1['un_house'].str.contains
+     ('Bolton')] = 'House Bolton' 
+
+got1['un_house'][got1['name'].str.contains
+     ('Brune')] = 'House Brune of Browhollow'
+got1['un_house'][got1['un_house'].str.contains
+     ('Brune')] = 'House Brune of Browhollow' 
+
+got1['un_house'][got1['name'].str.contains
+     ('Flint')] = 'House Flint'
+got1['un_house'][got1['un_house'].str.contains
+     ('Flint')] = 'House Flint'
+
+got1['un_house'][got1['name'].str.contains
+     ('Fossoway')] = 'House Fossoway'
+got1['un_house'][got1['un_house'].str.contains
+     ('Fossoway')] = 'House Fossoway'
+
+
+got1['un_house'][got1['name'].str.contains
+     ('Frey')] = 'House Frey'
+got1['un_house'][got1['un_house'].str.contains
+     ('Frey')] = 'House Frey'
+
+got1['un_house'][got1['name'].str.contains
+     ('Goodbrother')] = 'House Goodbrother'
+got1['un_house'][got1['un_house'].str.contains
+     ('Goodbrother')] ='House Goodbrother'
+
+got1['un_house'][got1['name'].str.contains
+     ('Harlaw')] = 'House Harlaw'
+got1['un_house'][got1['un_house'].str.contains
+     ('Harlaw')] = 'House Harlaw'
+
+got1['un_house'][got1['name'].str.contains
+     ('Royce')] = 'House Royce'
+got1['un_house'][got1['un_house'].str.contains
+     ('Royce')] = 'House Royce'
+
+got1['un_house'][got1['name'].str.contains
+     ('Tyrell')] = 'House Tyrell'
+got1['un_house'][got1['un_house'].str.contains
+     ('Frey')] = 'House Tyrell'
+
+
+
+
+#Creating Variables if people are maried and noble
+
+got1['isNobleMarried'] = got1.loc[ : ,'isNoble'] + got1.loc[: , 'isMarried']
+
+got1['isNobleMarried'] = got1['isNobleMarried'].replace(1, 0)
+
+got1['isNobleMarried'] = got1['isNobleMarried'].replace(2, 1)
+
+
+
+#Creating Top 5 
+#If they are in the top 5 = 1 if not = 0 
+
+#Creating Top House
+#Looking at the top 5 house, title,culture
+got1.pivot_table(index=['un_house'], 
+                 aggfunc='size').sort_values(ascending= False)
+got1.pivot_table(index=['un_title'], 
+                 aggfunc='size').sort_values(ascending= False)
+got1.pivot_table(index=['un_culture'], 
+                 aggfunc='size').sort_values(ascending= False)
+
+
+
+
+got1['top_house'] = got1['un_house'].replace({"Night's Watch":"top", 
+    "House Frey":"top",
+   "House Stark":"top",
+   "House Targaryen":"top",
+   "House Lannister":"top"})
+
+for row in enumerate(got1.loc[: ,'top_house']):
+    
+    if row[1] == 'top'  :
+        got1.loc[row[0], 'top_house'] = 1
+        
+    else:
+        got1.loc[row[0], 'top_house'] = 0
+
+
+#Creating Top Title
+got1['top_title'] = got1['un_title'].replace({"Ser":"top", "Maester":"top",
+   "Archmaester":"top",
+   "Lord":"top",
+   "Septon":"top"})
+
+for row in enumerate(got1.loc[: ,'top_title']):
+    
+    if row[1] == 'top'  :
+        got1.loc[row[0], 'top_title'] = 1
+        
+    else:
+        got1.loc[row[0], 'top_title'] = 0
+
+
+#Creating Top Culture
+got1['top_culture'] = got1['un_culture'].replace({"Northmen":"top", 
+    "Ironborn":"top",
+   "Free Folk":"top",
+   "Valyrian":"top",
+   "Braavosi":"top"})
+
+for row in enumerate(got1.loc[: ,'top_culture']):
+    
+    if row[1] == 'top'  :
+        got1.loc[row[0], 'top_culture'] = 1
+        
+    else:
+        got1.loc[row[0], 'top_culture'] = 0
+
+
+#Creating a variable if house is unknown  = 0 
+
+got1['house_un'] = got1['un_title'].replace({"Unknown":"top"})
+
+for row in enumerate(got1.loc[: ,'house_un']):
+    
+    if row[1] == 'top'  :
+        got1.loc[row[0], 'house_un'] = 1
+        
+    else:
+        got1.loc[row[0], 'house_un'] = 0
+
+
+#Creating a variable if house is unknown  = 0 
+
+got1['culture_un'] = got1['un_culture'].replace({"Unknown":"top"})
+
+for row in enumerate(got1.loc[: ,'culture_un']):
+    
+    if row[1] == 'top'  :
+        got1.loc[row[0], 'culture_un'] = 1
+        
+    else:
+        got1.loc[row[0], 'culture_un'] = 0
+
+
+###############################################################################
+#Using Get Dummies
+###############################################################################
+
+
+#house_dummies = pd.get_dummies(list(got1['un_house']), drop_first = True)
+#title_dummies = pd.get_dummies(list(got1['un_title']), drop_first = True)
+#culture_dummies = pd.get_dummies(list(got1['un_culture']), drop_first = True)
+
+
+
+#Joining the dummy variables to dataframe
+#got2 = pd.concat(
+        #[got1.loc[:,:],
+         #house_dummies, title_dummies, culture_dummies],
+         #axis = 1)
+
+
+
+
+#What year is it?
+
+got1['year']= got1.loc[ :,'dateOfBirth'] + got1.loc[ :,'age']
+
+sns.distplot(got1['year'],
+             color = 'y')
+plt.xlabel('Current Year/Yeat at death')
+
+
+
+
+
+#Creating a dummy variable to see in how many books do characters appear
+got1['in_how_many_books'] = got1.loc[ :, 'book1_A_Game_Of_Thrones'] +\
+got1.loc[ : , 'book2_A_Clash_Of_Kings'] +\
+got1.loc[ : , 'book3_A_Storm_Of_Swords'] +\
+got1.loc[ : , 'book4_A_Feast_For_Crows'] + got1.loc[ : , 
+        'book5_A_Dance_with_Dragons']
+    
+#In 0 Book
+got1['in0books'] = got1['in_how_many_books']
+
+got1['in0books'].values[got1['in0books'] > 0] = 1
+
+
+#In 1 book
+got1['in1book'] = got1['in_how_many_books'] 
+
+got1['in1book'] = got1['in1book'].replace(1,1)
+
+got1['in1book'] = got1['in1book'].replace(2,0)
+
+got1['in1book'] = got1 ['in1book'].replace(3,0)
+
+got1['in1book'] = got1['in1book'].replace(4,0)
+
+got1['in1book'] = got1['in1book'].replace(5,0)
+
+#In 2 books
+got1['in2books'] = got1['in_how_many_books'] 
+
+got1['in2books'] = got1['in2books'].replace(1,0)
+
+got1['in2books'] = got1['in2books'].replace(2,1)
+
+got1['in2books'] = got1 ['in2books'].replace(3,0)
+
+got1['in2books'] = got1['in2books'].replace(4,0)
+
+got1['in2books'] = got1['in2books'].replace(5,0)
+
+#In 3 books
+got1['in3books'] = got1['in_how_many_books'] 
+
+got1['in3books'] = got1['in3books'].replace(1,0)
+
+got1['in3books'] = got1['in3books'].replace(2,0)
+
+got1['in3books'] = got1 ['in3books'].replace(3,1)
+
+got1['in3books'] = got1['in3books'].replace(4,0)
+
+got1['in3books'] = got1['in3books'].replace(5,0)
+
+
+#In 4 books
+got1['in4books'] = got1['in_how_many_books'] 
+
+got1['in4books'] = got1['in4books'].replace(1,0)
+
+got1['in4books'] = got1['in4books'].replace(2,0)
+
+got1['in4books'] = got1 ['in4books'].replace(3,0)
+
+got1['in4books'] = got1['in4books'].replace(4,1)
+
+got1['in4books'] = got1['in4books'].replace(5,0)
+
+
+#In 5 books
+got1['in5books'] = got1['in_how_many_books'] 
+
+got1['in5books'] = got1['in5books'].replace(1,0)
+
+got1['in5books'] = got1['in5books'].replace(2,0)
+
+got1['in5books'] = got1 ['in5books'].replace(3,0)
+
+got1['in5books'] = got1['in5books'].replace(4,0)
+
+got1['in5books'] = got1['in5books'].replace(5,1)
+
+
+
+got = pd.DataFrame.copy(got1)
+
+got.columns
+
+
+###############################################################################
+#  Splitting the Data Using Train/Test Split 
+###############################################################################
+
+
+###Setting Up The Data###
+
+#Splitting Data
+got_data = got.loc[:, ['male', 
+                       'popularity',
+                       'in0books',
+                        'in5books',
+                        'numDeadRelations',
+                        'isNobleMarried',
+                        'year',
+                        'un_isAliveSpouse',
+                        'house_un',
+                        'top_house',
+                        'top_culture'
+                        ]]
+
+got_target =  got.loc[: , 'isAlive']
+
+
+
+#We will set test size to 0.10
+X_train, X_test, y_train, y_test = train_test_split(
+            got_data,
+            got_target,
+            test_size = 0.10,
+            random_state = 508)
+
+###############################################################################
+# Logistic Regression
+###############################################################################
+
+#Using Stats Model first
+got_log = smf.logit(formula = """isAlive ~ male
+                    + popularity
+                    + top_house
+                    + top_culture
+                    + in0books
+                    + in5books
+                    + numDeadRelations
+                    + isNobleMarried
+                    + year
+                    + house_un
+                    + un_isAliveSpouse
+                    """,
+                    data = got)
+
+
+result = got_log.fit()
+
+result.summary2()
+
+#Using Sklearn
+
+
+gotreg = LogisticRegression(solver = 'liblinear',
+                            C = 1,
+                            random_state = 508)
+
+
+gotreg_fit = gotreg.fit(X_train, y_train)
+
+gotreg_pred = gotreg_fit.predict(X_test)
+
+
+# Let's compare the testing score to the training score.
+print('Training Score', gotreg_fit.score(X_train, y_train).round(4))
+print('Testing Score:', gotreg_fit.score(X_test, y_test).round(4))
+
+#Creating CV and ROC_AUC Score
+cv_gotreg_3 = cross_val_score(gotreg, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_gotreg_3))
+
+
+
+###############################################################################
+#KNN - Classifier model
+###############################################################################
+
+# Creating two lists, one for training set accuracy and the other for test
+# set accuracy
+training_accuracy = []
+test_accuracy = []
+
+
+# Building a visualization to check to see  1 to 50
+neighbors_settings = range(1, 51)
+
+
+for n_neighbors in neighbors_settings:
+    # Building the model
+    clf = KNeighborsClassifier(n_neighbors = n_neighbors)
+    clf.fit(X_train, y_train)
+    
+    # Recording the training set accuracy
+    training_accuracy.append(clf.score(X_train, y_train))
+    
+    # Recording the generalization accuracy
+    test_accuracy.append(clf.score(X_test, y_test))
+
+
+# Plotting the visualization
+fig, ax = plt.subplots(figsize=(12,9))
+plt.plot(neighbors_settings, training_accuracy, label = "training accuracy")
+plt.plot(neighbors_settings, test_accuracy, label = "test accuracy")
+plt.ylabel("Accuracy")
+plt.xlabel("n_neighbors")
+plt.legend()
+plt.show()
+
+
+########################
+# What is the optimal number of neighbors?
+########################
+
+print(test_accuracy.index(max(test_accuracy))+1)
+# The best results occur when k = 28
+
+# Building a model with optimal number of n_neighbors
+knn_reg = KNeighborsClassifier(algorithm = 'auto',
+                              n_neighbors = 
+                              test_accuracy.index(max(test_accuracy))+1)
+
+
+
+# Fitting the model based on the training data
+knn_reg_fit = knn_reg.fit(X_train, y_train)
+
+
+y_pred = knn_reg.predict(X_test)
+
+
+
+# Scoring the model
+y_score_train = knn_reg.score(X_train, y_train)
+y_score_test = knn_reg.score(X_test, y_test)
+
+
+
+print(y_score_train)
+print(y_score_test)
+
+
+y_pred_train = knn_reg_fit.predict(X_train)
+y_pred_test = knn_reg_fit.predict(X_test)
+
+
+#Creating CV and ROC_AUC Score
+cv_knn_reg_3 = cross_val_score(knn_reg, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_knn_reg_3))
+
+
+########################
+# Comparing the Regular KNN vs Scaled KNN
+########################
+### Scaled KNN 
+
+# Removing the target variable. It is (generally) not necessary to scale that.
+
+got_features = got_data
+
+
+# Instantiating a StandardScaler() object
+scaler = StandardScaler()
+
+
+# Fitting the scaler with our data
+scaler.fit(got_features)
+
+
+# Transforming our data after fit
+X_scaled = scaler.transform(got_features)
+
+
+# Putting our scaled data into a DataFrame
+X_scaled_df = pd.DataFrame(X_scaled)
+
+
+# Adding labels to our scaled DataFrame
+X_scaled_df.columns = got_features.columns
+
+
+#  Checking pre- and post-scaling of the data
+print(pd.np.var(got_features))
+print(pd.np.var(X_scaled_df))
+
+
+# Adding labels to our scaled DataFrame
+X_scaled_df.columns = got_features.columns
+
+gotX_target = got.loc[: , 'isAlive']
+
+XScaled_data = X_scaled_df.loc[: , ['male', 
+                       'popularity',
+                       'in0books',
+                        'in5books',
+                        'numDeadRelations',
+                        'isNobleMarried',
+                        'year',
+                        'un_isAliveSpouse',
+                        'house_un',
+                        'top_house',
+                        'top_culture'
+                        ]]
+
+X_train2, X_test2, y_train2, y_test2 = train_test_split(XScaled_data, 
+                                                        gotX_target,
+                                                        test_size = .10,
+                                                        random_state = 508)
+
+
+
+
+# Creating two lists, one for training set accuracy and the other for test
+# set accuracy
+training_accuracy2 = []
+test_accuracy2 = []
+
+
+# Building a visualization to check to see  1 to 50
+neighbors_settings2 = range(1, 51)
+
+
+for n_neighbors in neighbors_settings2:
+    # Building the model
+    clf = KNeighborsClassifier(n_neighbors = n_neighbors)
+    clf.fit(X_train, y_train)
+    
+    # Recording the training set accuracy
+    training_accuracy2.append(clf.score(X_train2, y_train2))
+    
+    # Recording the generalization accuracy
+    test_accuracy2.append(clf.score(X_test2, y_test2))
+
+
+# Plotting the visualization
+fig, ax = plt.subplots(figsize=(12,9))
+plt.plot(neighbors_settings2, training_accuracy2, label = "training accuracy")
+plt.plot(neighbors_settings2, test_accuracy2, label = "test accuracy")
+plt.ylabel("Accuracy")
+plt.xlabel("n_neighbors")
+plt.legend()
+plt.show()
+
+
+########################
+# What is the optimal number of neighbors?
+########################
+
+print(test_accuracy2.index(max(test_accuracy2))+1)
+
+
+
+# Building a model with optimal number of n_neighbors
+knn_scaled = KNeighborsClassifier(algorithm = 'auto',
+                              n_neighbors = 
+                              test_accuracy2.index(max(test_accuracy2))+1)
+
+
+
+# Fitting the model based on the training data
+knn_scaled_fit = knn_scaled.fit(X_train2, y_train2)
+
+
+y_pred_scaled = knn_scaled.predict(X_test2)
+
+
+
+# Scoring the model
+y_score_train_scaled = knn_scaled.score(X_train2, y_train2)
+y_score_test_scaled = knn_scaled.score(X_test2, y_test2)
+
+
+
+y_pred_train_scaled = knn_scaled_fit.predict(X_train2)
+y_pred_test_scaled = knn_scaled_fit.predict(X_test2)
+
+
+print(y_score_train_scaled)
+print(y_score_test_scaled)
+
+
+print('Training AUC Score', roc_auc_score(y_train2, 
+                                          y_pred_train_scaled).round(4))
+print('Testing AUC Score:', roc_auc_score(y_test2, 
+                                          y_pred_test_scaled).round(4))
+
+#Creating CV and ROC_AUC Score
+cv_knn_scaled_3 = cross_val_score(knn_scaled, 
+                               XScaled_data, 
+                               gotX_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_knn_scaled_3))
+
+
+
+
+
+###############################################################################
+# Building Classification Trees
+###############################################################################
+
+########################
+# Optimizing ewith hyperparameters
+########################
+
+
+# Creating a hyperparameter grid
+depth_space = pd.np.arange(1, 10)
+leaf_space = pd.np.arange(1, 50)
+criterion_space = ['gini', 'entropy']
+
+
+param_grid = {'max_depth' : depth_space,
+              'min_samples_leaf' : leaf_space,
+              'criterion' : criterion_space}
+
+
+# Building the model object one more time
+got_tree = DecisionTreeClassifier(random_state = 508)
+
+
+
+# Creating a GridSearchCV object
+got_tree_cv = GridSearchCV(got_tree, param_grid, cv = 3)
+
+
+
+# Fit it to the training data
+got_tree_fit = got_tree_cv.fit(X_train, y_train)
+
+
+
+# Print the optimal parameters and best score
+print("GOT Tree Parameter:", got_tree_cv.best_params_)
+print("GOT TREE Accuracy:", got_tree_cv.best_score_.round(4))
+
+
+#Creating CV and ROC_AUC Score
+cv_got_tree_3 = cross_val_score(got_tree, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_got_tree_3))
+
+
+###############################################################################
+# Visualizing the Tree
+###############################################################################
+
+# Building a tree model object with optimal hyperparameters
+got_tree_optimal = DecisionTreeClassifier(criterion = 'entropy',
+        random_state = 508,
+        max_depth = 6,
+        min_samples_leaf = 30)
+
+
+got_tree_optimal_fit = got_tree_optimal.fit(X_train, y_train)
+
+#Creating CV and ROC_AUC Score
+cv_got_optimal_tree_3 = cross_val_score(got_tree_optimal_fit, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_got_optimal_tree_3))
+
+
+dot_data = StringIO()
+
+
+export_graphviz(decision_tree = got_tree_optimal_fit,
+                out_file = dot_data,
+                filled = True,
+                rounded = True,
+                special_characters = True,
+                feature_names = X_train.columns)
+
+
+graph = pydotplus.graph_from_dot_data(dot_data.getvalue())
+
+Image(graph.create_png(),
+      height = 500,
+      width = 800)
+
+
+# Saving the visualization in the working directory
+graph.write_png("GOT_Optimal_Classification_Tree.png")
+
+
+# Feature importance function
+########################
+
+def plot_feature_importances(model, train = X_train, export = False):
+    fig, ax = plt.subplots(figsize=(12,9))
+    n_features = X_train.shape[1]
+    plt.barh(range(n_features), model.feature_importances_, align='center')
+    plt.yticks(pd.np.arange(n_features), train.columns)
+    plt.xlabel("Feature Importance")
+    plt.ylabel("Feature")
+    
+    if export == True:
+        plt.savefig('GOT_Tree_Leaf_Feature_Importance.png')
+
+########################
+
+
+plot_feature_importances(got_tree_optimal,
+                         train = X_train,
+                         export = True)
+
+
+
+
+###############################################################################
+# Ensamble Modeling
+###############################################################################
+
+########################
+# Random Forrests
+########################
+
+# Creating a hyperparameter grid
+estimator_space = pd.np.arange(100, 1000, 250)
+leaf_space = pd.np.arange(1, 50, 15)
+criterion_space = ['gini', 'entropy']
+bootstrap_space = [True, False]
+warm_start_space = [True, False]
+
+
+
+param_grid = {'n_estimators' : estimator_space,
+              'min_samples_leaf' : leaf_space,
+              'criterion' : criterion_space,
+              'bootstrap' : bootstrap_space,
+              'warm_start' : warm_start_space}
+
+
+
+# Building the model object one more time
+got_forest_grid = RandomForestClassifier(max_depth = None,
+                                          random_state = 508)
+
+
+# Creating a GridSearchCV object
+got_forest_cv = GridSearchCV(got_forest_grid, param_grid, cv = 3)
+
+
+
+# Fit it to the training data
+got_forest_cv.fit(X_train, y_train)
+
+
+
+# Print the optimal parameters and best score
+print(got_forest_cv.best_params_)
+print(got_forest_cv.best_score_.round(4))
+
+#  Best Random Forrests
+########################
+
+got_optimal = RandomForestClassifier(bootstrap = True,
+                                    criterion = 'entropy',
+                                    min_samples_leaf = 16,
+                                    n_estimators = 350,
+                                    warm_start = True)
+
+
+
+got_optimal.fit(X_train, y_train)
+
+
+got_optimal_pred = got_optimal.predict(X_test)
+
+
+print('Training Score', got_optimal.score(X_train, y_train).round(4))
+print('Testing Score:', got_optimal.score(X_test, y_test).round(4))
+
+
+#Creating CV and ROC_AUC Score
+cv_got_optimal_3 = cross_val_score(got_optimal, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_got_optimal_3))
+
+
+
+got_optimal_train = got_optimal.score(X_train, y_train)
+got_optimal_test  = got_optimal.score(X_test, y_test)
+
+########################
+# GradientBoosting 
+########################
+
+# Creating a hyperparameter grid
+learn_space = pd.np.arange(0.01, 1.0, 0.01)
+estimator_space = pd.np.arange(100, 1000, 50)
+depth_space = pd.np.arange(1, 5)
+criterion_space = ['friedman_mse', 'mse', 'mae']
+
+
+param_grid = {#'learning_rate' : learn_space,
+              'max_depth' : depth_space,
+              'criterion' : criterion_space,
+              'n_estimators' : estimator_space}
+
+
+
+# Building the model object one more time
+got_grid = GradientBoostingClassifier(random_state = 508)
+
+
+
+# Creating a RandomizedSearchCV object
+got_gb_grid_cv = GridSearchCV(got_grid, 
+                                 param_grid, 
+                                 cv = 3,)
+
+
+
+
+
+# Fit it to the training data
+got_gb_grid_cv.fit(X_train, y_train)
+
+
+
+# Print the optimal parameters and best score
+print("Tuned GBM Parameter:", got_gb_grid_cv.best_params_)
+print("Tuned GBM Accuracy:", got_gb_grid_cv.best_score_.round(4))
+
+
+
+########################
+# Building GBM Model Based on Best Parameters
+########################
+
+got_gbm_optimal = GradientBoostingClassifier(criterion = 'friedman_mse',
+                                      learning_rate = .1,
+                                      max_depth = 1,
+                                      n_estimators = 500,
+                                      random_state = 508)
+
+
+got_gbm_optimal_fit = got_gbm_optimal.fit(X_train, y_train)
+got_gbm_optimal_score = got_gbm_optimal.score(X_test, y_test)
+
+
+got_gbm_optimal_pred = got_gbm_optimal.predict(X_test)
+
+
+# Feature importance function for GBM
+########################
+
+def plot_feature_importances(model, train = X_train, export = False):
+    fig, ax = plt.subplots(figsize=(12,9))
+    n_features = X_train.shape[1]
+    plt.barh(range(n_features), model.feature_importances_, align='center')
+    plt.yticks(pd.np.arange(n_features), train.columns)
+    plt.xlabel("Feature Importance")
+    plt.ylabel("Feature")
+    
+    if export == True:
+        plt.savefig('GOT_Boost_Feature_Importance.png')
+
+########################
+        
+
+
+plot_feature_importances(got_gbm_optimal,
+                         train = X_train,
+                         export = True)
+
+########################
+
+# Training and Testing Scores
+print('Training Score', got_gbm_optimal.score(X_train, y_train).round(4))
+print('Testing Score:', got_gbm_optimal.score(X_test, y_test).round(4))
+
+
+got_gbm_optimal_train = got_gbm_optimal.score(X_train, y_train)
+got_gmb_optimal_test  = got_gbm_optimal.score(X_test, y_test)
+
+#Creating CV and ROC_AUC Score
+cv_got_gbm_optimal_3 = cross_val_score(got_gbm_optimal, 
+                               got_data, 
+                               got_target, 
+                               cv = 3,
+                               scoring = 'roc_auc' )
+
+print(pd.np.mean(cv_got_gbm_optimal_3).round(3))
+
+
+
+#Comparing all model results
+
+print("Using KNN")
+print("GOT KNN Training Score:", y_score_train.round(3))
+print("GOT KNN Testing Score:", y_score_test.round(3))
+
+print('Training ROC_AUC Score:', roc_auc_score(y_train, y_pred_train).round(3))
+print('Testing ROC_AUC Score:', roc_auc_score(y_test, y_pred_test).round(3))
+print('Using CV ROC_AUC:', pd.np.mean(cv_knn_reg_3).round(3))
+
+
+print("Using KNN Scaled")
+print('GOT KNN Scaled Training Score:', y_score_train_scaled.round(3))
+print('GOT KNN Scaled Testing Score:', y_score_test_scaled.round(3))
+
+print('Training AUC Score Scaled', roc_auc_score(y_train2, 
+                                                 y_pred_train_scaled).round(3))
+print('Testing AUC Score Scaled:', roc_auc_score(y_test2, 
+                                                 y_pred_test_scaled).round(3))
+print('Using CV ROC_AUC:', pd.np.mean(cv_knn_scaled_3).round(3))
+
+print("Using Decision Tree")
+print("GOT TREE Accuracy:", got_tree_cv.best_score_.round(3))
+print('Using CV ROC_AUC:', pd.np.mean(cv_got_tree_3).round(3))
+
+
+print("Using Random Forrest Optimal Model")
+print('Random Forrest Training Score', got_optimal.score
+      (X_train, y_train).round(3))
+print('Random Forrest Testing Score:', 
+      got_optimal.score(X_test, y_test).round(3))
+print('Using CV ROC_AUC:', pd.np.mean(cv_got_optimal_3).round(3))
+
+
+
+print("Using Gradient Boosting Optimal Model")
+print('Gradient Boosting Training Score', 
+      got_gbm_optimal.score(X_train, y_train).round(3))
+print('Gradient Boosting Testing Score:', 
+      got_gbm_optimal.score(X_test, y_test).round(3))
+
+print('Using CV ROC_AUC:',pd.np.mean(cv_got_gbm_optimal_3).round(3))
+
+
+########################
+# Confusion Matrix
+########################
+
+# Run the following code to create a confusion matrix
+print(confusion_matrix(y_true = y_test,
+                       y_pred = got_gbm_optimal_pred))
+
+
+# Visualizing the confusion matrix
+labels = ['Dead', 'Alive']
+
+cm = confusion_matrix(y_true = y_test,
+                      y_pred = got_gbm_optimal_pred)
+
+
+sns.heatmap(cm,
+            annot = True,
+            xticklabels = labels,
+            yticklabels = labels,
+            cmap = 'Reds')
+
+
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion matrix of the classifier')
+plt.show()
+
+
+
+
+
+
+########################
+# Saving Results
+########################
+
+# Saving best model scores
+
+model_predictions_df = pd.DataFrame({'Actual' : y_test,
+                                     'GBM_Predicted': got_gbm_optimal_pred})
+
+
+model_predictions_df.to_excel("GOT_Model_Predictions.xlsx")
